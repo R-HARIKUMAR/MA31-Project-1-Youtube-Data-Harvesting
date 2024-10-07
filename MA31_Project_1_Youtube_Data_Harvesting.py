@@ -5,8 +5,6 @@ from mysql.connector import Error
 import pandas as pd
 from datetime import datetime
 
-
-
 # YouTube API details
 api_service_name = "youtube"
 api_version = "v3"
@@ -17,13 +15,7 @@ youtube = googleapiclient.discovery.build(api_service_name, api_version, develop
 def create_connection():
     connection = None
     try:
-        connection = mysql.connector.connect(
-            host="localhost",
-            user="root",
-            password="admin",
-            database="youtube_data",
-            charset='utf8mb4'
-        )
+        connection = mysql.connector.connect( host="localhost", user="root", password="admin",database="youtube_data",charset='utf8mb4'        )
         print("Successfully connected to MySQL database")
     except Error as e:
         print(f"Error: {e}")
@@ -31,10 +23,7 @@ def create_connection():
 
 # This Function to get channel details
 def get_channel_data(channel_id):
-    request = youtube.channels().list(
-        part="snippet,statistics,contentDetails",
-        id=channel_id
-    )
+    request = youtube.channels().list(part="snippet,statistics,contentDetails", id=channel_id)
     response = request.execute()
     
     if 'items' in response:
@@ -44,18 +33,14 @@ def get_channel_data(channel_id):
             'channel_name': channel_data['snippet']['title'],
             'subscribers': channel_data['statistics']['subscriberCount'],
             'total_videos': channel_data['statistics']['videoCount'],
-            'playlist_id': channel_data['contentDetails']['relatedPlaylists']['uploads']
-        }
+            'playlist_id': channel_data['contentDetails']['relatedPlaylists']['uploads']   }
     return None
 
 # This Function to get video details
 def get_video_data(video_id):
-    request = youtube.videos().list(
-        part="snippet,statistics,contentDetails",
-        id=video_id
-    )
+    request = youtube.videos().list(part="snippet,statistics,contentDetails", id=video_id)
     response = request.execute()
-    
+
     if 'items' in response:
         video_data = response['items'][0]
         published_at = datetime.strptime(video_data['snippet']['publishedAt'], '%Y-%m-%dT%H:%M:%SZ')
@@ -85,12 +70,8 @@ def insert_data_to_mysql(connection, channel_data, videos_data):
     playlist_id = VALUES(playlist_id)
     """
     channel_values = (
-        channel_data['channel_id'],
-        channel_data['channel_name'],
-        channel_data['subscribers'],
-        channel_data['total_videos'],
-        channel_data['playlist_id']
-    )
+        channel_data['channel_id'],channel_data['channel_name'],channel_data['subscribers'], channel_data['total_videos'],
+        channel_data['playlist_id'] )
     cursor.execute(channel_insert_query, channel_values)
     
     # To Insert video data
@@ -187,26 +168,19 @@ def get_predefined_query(query_name):
         """
     }
     return queries.get(query_name, "SELECT 1") 
-
-
 # To interact user using Streamlit app
-
 def main():
     st.title("YouTube Data Harvesting and Warehousing")
     
     # to get Input for channel ID from user 
     channel_id = st.text_input("Enter YouTube Channel ID for search")
-    
-    
-
     if st.button("Retrieve and Store Channel Data"):
-      
         channel_data = get_channel_data(channel_id)
         if channel_data:
             st.write(f"Channel Name: {channel_data['channel_name']}")
             st.write(f"Subscribers: {channel_data['subscribers']}")
             st.write(f"Total Videos: {channel_data['total_videos']}")
-            
+          
             # To Get video data 
             playlist_id = channel_data['playlist_id']
             videos_data = []
@@ -243,7 +217,6 @@ def main():
                 connection.close()
         else:
             st.error("Failed to retrieve channel data. Please check the channel ID.")
-    
   
   #to get query from user
     query_options = [
@@ -257,8 +230,7 @@ def main():
         "Total views for each channel",
         "Channels with videos published in 2022",
         "Average video duration for each channel",
-        "Videos with highest comment count"
-    ]
+        "Videos with highest comment count"   ]
     selected_query = st.selectbox("Select any one query to execute:", query_options)
 
     if selected_query != "Select a query":
