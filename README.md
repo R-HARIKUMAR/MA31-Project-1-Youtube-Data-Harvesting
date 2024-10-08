@@ -26,7 +26,7 @@ Set up your YouTube Data API key:
 
 1.	How to Run the Streamlit app: 
               streamlit run app.py
-2.	Open your web browser and go to http://localhost:8501
+2.	Open your web browser and get output
 3.	Enter a YouTube Channel ID in the input field and click "Retrieve and Store Channel Data" to fetch and store the data
 4.	Use the dropdown menu to select and execute predefined queries on the stored data
 
