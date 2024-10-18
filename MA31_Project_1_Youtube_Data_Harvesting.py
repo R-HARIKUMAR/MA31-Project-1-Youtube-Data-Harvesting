@@ -15,15 +15,33 @@ youtube = googleapiclient.discovery.build(api_service_name, api_version, develop
 def create_connection():
     connection = None
     try:
-        connection = mysql.connector.connect( host="localhost", user="root", password="admin",database="youtube_data",charset='utf8mb4'        )
+        connection = mysql.connector.connect(
+            host="localhost",
+            user="root",
+            password="admin",
+            database="youtube_data",
+            charset='utf8mb4'
+        )
         print("Successfully connected to MySQL database")
     except Error as e:
         print(f"Error: {e}")
     return connection
 
+# To Check for existing channels Id
+def check_channel_exists(connection, channel_id):
+    cursor = connection.cursor()
+    query = "SELECT channel_id FROM channels WHERE channel_id = %s"
+    cursor.execute(query, (channel_id,))
+    result = cursor.fetchone()
+    cursor.close()
+    return result is not None
+
 # This Function to get channel details
 def get_channel_data(channel_id):
-    request = youtube.channels().list(part="snippet,statistics,contentDetails", id=channel_id)
+    request = youtube.channels().list(
+        part="snippet,statistics,contentDetails",
+        id=channel_id
+    )
     response = request.execute()
     
     if 'items' in response:
@@ -33,29 +51,71 @@ def get_channel_data(channel_id):
             'channel_name': channel_data['snippet']['title'],
             'subscribers': channel_data['statistics']['subscriberCount'],
             'total_videos': channel_data['statistics']['videoCount'],
-            'playlist_id': channel_data['contentDetails']['relatedPlaylists']['uploads']   }
+            'playlist_id': channel_data['contentDetails']['relatedPlaylists']['uploads']
+        }
     return None
 
 # This Function to get video details
 def get_video_data(video_id):
-    request = youtube.videos().list(part="snippet,statistics,contentDetails", id=video_id)
+    request = youtube.videos().list(
+        part="snippet,statistics,contentDetails",
+        id=video_id
+    )
     response = request.execute()
-
+    
     if 'items' in response:
         video_data = response['items'][0]
         published_at = datetime.strptime(video_data['snippet']['publishedAt'], '%Y-%m-%dT%H:%M:%SZ')
+        duration = video_data['contentDetails']['duration']
+        
         return {
             'video_id': video_id,
             'title': video_data['snippet']['title'],
             'views': video_data['statistics']['viewCount'],
             'likes': video_data['statistics'].get('likeCount', 0),
             'comments': video_data['statistics'].get('commentCount', 0),
-            'duration': video_data['contentDetails']['duration'],
+            'duration': duration,
             'published_at': published_at.strftime('%Y-%m-%d %H:%M:%S')
         }
     return None
 
-# To insert data into MySQL
+# This Function to get video comment details
+def get_video_comments(video_id):
+    comments_data = []
+    try:
+        next_page_token = None
+        while True:
+            request = youtube.commentThreads().list(
+                part="snippet",
+                videoId=video_id,
+                pageToken=next_page_token
+            )
+            response = request.execute()
+            
+            for item in response['items']:
+                comment = item['snippet']['topLevelComment']['snippet']
+                comment_data = {
+                    'comment_id': item['id'],
+                    'video_id': video_id,
+                    'comment_text': comment['textDisplay'],
+                    'comment_author': comment['authorDisplayName'],
+                    'comment_published_date': datetime.strptime(
+                        comment['publishedAt'], 
+                        '%Y-%m-%dT%H:%M:%SZ'
+                    ).strftime('%Y-%m-%d %H:%M:%S')
+                }
+                comments_data.append(comment_data)
+            
+            next_page_token = response.get('nextPageToken')
+            if not next_page_token:
+                break
+                
+    except Exception as e:
+        print(f"Error getting comments for video {video_id}: {str(e)}")
+    
+    return comments_data
+
+# To insert various data into MySQL
 def insert_data_to_mysql(connection, channel_data, videos_data):
     cursor = connection.cursor()
     
@@ -70,8 +130,12 @@ def insert_data_to_mysql(connection, channel_data, videos_data):
     playlist_id = VALUES(playlist_id)
     """
     channel_values = (
-        channel_data['channel_id'],channel_data['channel_name'],channel_data['subscribers'], channel_data['total_videos'],
-        channel_data['playlist_id'] )
+        channel_data['channel_id'],
+        channel_data['channel_name'],
+        channel_data['subscribers'],
+        channel_data['total_videos'],
+        channel_data['playlist_id']
+    )
     cursor.execute(channel_insert_query, channel_values)
     
     # To Insert video data
@@ -86,7 +150,19 @@ def insert_data_to_mysql(connection, channel_data, videos_data):
     duration = VALUES(duration),
     published_at = VALUES(published_at)
     """
+    
+    # To Insert comment data
+    comment_insert_query = """
+    INSERT INTO comment (comment_id, video_id, comment_text, comment_author, comment_published_date)
+    VALUES (%s, %s, %s, %s, %s)
+    ON DUPLICATE KEY UPDATE
+    comment_text = VALUES(comment_text),
+    comment_author = VALUES(comment_author),
+    comment_published_date = VALUES(comment_published_date)
+    """
+    
     for video in videos_data:
+        # Insert video data
         video_values = (
             video['video_id'],
             channel_data['channel_id'],
@@ -98,10 +174,23 @@ def insert_data_to_mysql(connection, channel_data, videos_data):
             video['published_at']
         )
         cursor.execute(video_insert_query, video_values)
+        
+        # Get and insert comments
+        comments = get_video_comments(video['video_id'])
+        for comment in comments:
+            comment_values = (
+                comment['comment_id'],
+                comment['video_id'],
+                comment['comment_text'],
+                comment['comment_author'],
+                comment['comment_published_date']
+            )
+            cursor.execute(comment_insert_query, comment_values)
     
     connection.commit()
     cursor.close()
 
+# This function execute predefined queries 
 def get_predefined_query(query_name):
     queries = {
         "Video names and their channels": """
@@ -113,7 +202,6 @@ def get_predefined_query(query_name):
             SELECT channel_name, total_videos
             FROM channels
             ORDER BY total_videos DESC
-            LIMIT 10
         """,
         "Top 10 most viewed videos": """
             SELECT v.title AS video_name, c.channel_name, v.views
@@ -153,11 +241,27 @@ def get_predefined_query(query_name):
             WHERE YEAR(v.published_at) = 2022
         """,
         "Average video duration for each channel": """
-            SELECT c.channel_name, AVG(TIME_TO_SEC(v.duration)) AS avg_duration_seconds
-            FROM channels c
-            JOIN videos v ON c.channel_id = v.channel_id
-            GROUP BY c.channel_id
-            ORDER BY avg_duration_seconds DESC
+            SELECT c.channel_name, 
+                ROUND(AVG(CASE
+                        WHEN v.duration REGEXP 'PT[0-9]+H' THEN 
+                            SUBSTRING_INDEX(SUBSTRING_INDEX(v.duration, 'H', 1), 'PT', -1) * 3600
+                        ELSE 0
+                    END +
+                    CASE
+                        WHEN v.duration REGEXP 'PT.*[0-9]+M' THEN 
+                            SUBSTRING_INDEX(SUBSTRING_INDEX(SUBSTRING_INDEX(v.duration, 'M', 1), 'PT', -1), 'H', -1) * 60
+                        ELSE 0
+                    END +
+                    CASE
+                        WHEN v.duration REGEXP 'PT.*[0-9]+S' THEN 
+                            SUBSTRING_INDEX(SUBSTRING_INDEX(SUBSTRING_INDEX(v.duration, 'S', 1), 'PT', -1), 'M', -1)
+                        ELSE 0
+                    END
+                ) / 60, 2) as avg_duration_minutes, 
+                COUNT(*) as video_count FROM 
+                channels c JOIN videos v ON c.channel_id = v.channel_id
+            GROUP BY c.channel_name
+            ORDER BY avg_duration_minutes DESC
         """,
         "Videos with highest comment count": """
             SELECT v.title AS video_name, c.channel_name, v.comments
@@ -165,60 +269,81 @@ def get_predefined_query(query_name):
             JOIN channels c ON v.channel_id = c.channel_id
             ORDER BY v.comments DESC
             LIMIT 10
+        """,
+        "Latest comments for videos": """
+            SELECT v.title AS video_name, c.comment_text, c.comment_author, 
+                   c.comment_published_date
+            FROM videos v
+            JOIN comment c ON v.video_id = c.video_id
+            ORDER BY c.comment_published_date DESC
+            LIMIT 10
+        """,
+        "Most active commenters": """
+            SELECT comment_author, COUNT(*) as comment_count
+            FROM comment
+            GROUP BY comment_author
+            ORDER BY comment_count DESC
+            LIMIT 10
         """
     }
-    return queries.get(query_name, "SELECT 1") 
-# To interact user using Streamlit app
+    return queries.get(query_name, "SELECT 1")
+
+# This project start from here
 def main():
     st.title("YouTube Data Harvesting and Warehousing")
     
-    # to get Input for channel ID from user 
     channel_id = st.text_input("Enter YouTube Channel ID for search")
+    
     if st.button("Retrieve and Store Channel Data"):
-        channel_data = get_channel_data(channel_id)
-        if channel_data:
-            st.write(f"Channel Name: {channel_data['channel_name']}")
-            st.write(f"Subscribers: {channel_data['subscribers']}")
-            st.write(f"Total Videos: {channel_data['total_videos']}")
-          
-            # To Get video data 
-            playlist_id = channel_data['playlist_id']
-            videos_data = []
-            next_page_token = None
+        connection = create_connection()
+        
+        if connection:
+            # To check channel id already exists or not
+            if check_channel_exists(connection, channel_id):
+                st.warning("This channel data already exists in the database. \
+                                   Please enter a different channel ID.")
+                connection.close()
+                return
             
-            with st.spinner("Retrieving video data..."):
-                while True:
-                    request = youtube.playlistItems().list(
-                        part="snippet",
-                        playlistId=playlist_id,
-                        maxResults=50,
-                        pageToken=next_page_token
-                    )
-                    response = request.execute()
-                    
-                    for item in response['items']:
-                        video_id = item['snippet']['resourceId']['videoId']
-                        video_data = get_video_data(video_id)
-                        if video_data:
-                            videos_data.append(video_data)
-                    
-                    next_page_token = response.get('nextPageToken')
-                    if not next_page_token or len(videos_data) >= 200:  
-                        break
-            
-            st.write(f"Retrieved data for {len(videos_data)} videos")
-            
-            # To Store data in MySQL
-            connection = create_connection()
-            if connection:
+            channel_data = get_channel_data(channel_id)
+            if channel_data:
+                st.write(f"Channel Name: {channel_data['channel_name']}")
+                st.write(f"Subscribers: {channel_data['subscribers']}")
+                st.write(f"Total Videos: {channel_data['total_videos']}")
+                
+                # To Get video data
+                playlist_id = channel_data['playlist_id']
+                videos_data = []
+                next_page_token = None
+                
+                with st.spinner("Retrieving video data and comments..."):
+                    while True:
+                        request = youtube.playlistItems().list(
+                            part="snippet",
+                            playlistId=playlist_id,
+                            pageToken=next_page_token
+                        )
+                        response = request.execute()
+                        
+                        for item in response['items']:
+                            video_id = item['snippet']['resourceId']['videoId']
+                            video_data = get_video_data(video_id)
+                            if video_data:
+                                videos_data.append(video_data)
+                        
+                        next_page_token = response.get('nextPageToken')
+                        if not next_page_token:
+                            break
+                
+                st.write(f"Retrieved data for {len(videos_data)} videos")
+                
                 with st.spinner("Storing data in MySQL..."):
                     insert_data_to_mysql(connection, channel_data, videos_data)
                 st.success("Data successfully stored in MySQL database")
                 connection.close()
-        else:
-            st.error("Failed to retrieve channel data. Please check the channel ID.")
-  
-  #to get query from user
+            else:
+                st.error("Failed to retrieve channel data. Please check the channel ID.")
+    
     query_options = [
         "Select a query",
         "Video names and their channels",
@@ -230,7 +355,11 @@ def main():
         "Total views for each channel",
         "Channels with videos published in 2022",
         "Average video duration for each channel",
-        "Videos with highest comment count"   ]
+        "Videos with highest comment count",
+        "Latest comments for videos",
+        "Most active commenters"
+    ]
+    
     selected_query = st.selectbox("Select any one query to execute:", query_options)
 
     if selected_query != "Select a query":
@@ -245,6 +374,6 @@ def main():
                 st.error(f"Error executing query: {e}")
             finally:
                 connection.close()
-    
+
 if __name__ == "__main__":
     main()
