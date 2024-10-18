@@ -31,13 +31,15 @@ Set up your YouTube Data API key:
 4.	Use the dropdown menu to select and execute predefined queries on the stored data
 
 Predefined Queries:
-  1.	Video names and their channels
-  2.	Channels with most videos
-  3.	Top 10 most viewed videos
-  4.	Comments count for each video
-  5.	Videos with highest likes
-  6.	Total likes for each video
-  7.	Total views for each channel
-  8.	Channels with videos published in 2022
-  9.	Average video duration for each channel
-  10.	Videos with highest comment count
+         1. Video names and their channels
+         2. Channels with most videos
+         3. Top 10 most viewed videos
+         4. Comments count for each video
+         5. Videos with highest likes
+         6. Total likes for each video
+         7. Total views for each channel
+         8. Channels with videos published in 2022
+         9. Average video duration for each channel
+         10. Videos with highest comment count
+         11. Latest comments for videos
+         12. Most active commenters
